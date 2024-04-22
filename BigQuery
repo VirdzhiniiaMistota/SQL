@@ -1,0 +1,68 @@
+--Завдання 1
+SELECT
+  date(timestamp_micros(event_timestamp)) as event_timestamp,
+  user_pseudo_id,
+  (SELECT value.int_value FROM e.event_params WHERE key = 'ga_session_id') as session_id,
+  event_name,
+  geo.country as country,
+  device.category as device_category,
+  traffic_source.source	 as source, 
+  traffic_source.medium	 as medium,
+  traffic_source.name	as campaign
+FROM `bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*` e
+WHERE 
+  event_name IN ('session_start','view_item','add_to_cart','begin_checkout','add_shipping_info','add_payment_info','purchase')  
+  AND _TABLE_SUFFIX BETWEEN '20210101' AND '20211231'
+;
+
+--Завдання 2
+with cte1 as (
+SELECT
+  date(timestamp_micros(event_timestamp)) as event_date,
+  event_name,
+  traffic_source.source	 as source, 
+  traffic_source.medium	 as medium,
+  traffic_source.name	as campaign,
+  count(distinct CONCAT((SELECT value.int_value FROM e.event_params WHERE key = 'ga_session_id'), user_pseudo_id)) as user_sessions_count,
+  count(distinct case when event_name = 'add_to_cart' then CONCAT ((SELECT value.int_value FROM e.event_params WHERE key = 'ga_session_id'), user_pseudo_id) end) as e_add_to_cart,
+  count(distinct case when event_name = 'begin_checkout' then CONCAT((SELECT value.int_value FROM e.event_params WHERE key = 'ga_session_id'), user_pseudo_id) end) as e_begin_checkout,
+  count(distinct case when event_name = 'purchase' then CONCAT((SELECT value.int_value FROM e.event_params WHERE key = 'ga_session_id'), user_pseudo_id) end) as e_purchase
+FROM `bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*` e
+group by event_date,
+        event_name,
+        source,
+        medium,
+        campaign
+)   
+SELECT
+  event_date,
+  source,
+  medium,
+  campaign,
+  user_sessions_count,
+  round (((e_add_to_cart/user_sessions_count)*100),6) as visit_to_cart,
+  round (((e_begin_checkout/user_sessions_count)*100),6) as visit_to_checkout,
+  round (((e_purchase/user_sessions_count)*100),6) as visit_to_purchase
+from cte1
+;
+
+
+----Завдання 3
+with cte1 as (
+  select
+regexp_extract(
+      (select value.string_value from unnest(event_params) where key = 'page_location'),
+      r'(?:\w+\:\/\/)?[^\/]+\/([^\?#]*)') as page_path,
+      count(distinct CONCAT((SELECT value.int_value FROM e.event_params WHERE key = 'ga_session_id'), user_pseudo_id)) as user_sessions_count,
+      count(distinct case when event_name = 'purchase' then CONCAT((SELECT value.int_value FROM e.event_params WHERE key = 'ga_session_id'), user_pseudo_id) end) as e_purchase,
+      COUNTIF(event_name IN ('purchase')) AS purchase_event_count
+  from `bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*` e
+ where event_name in ('session_start','purchase') and _TABLE_SUFFIX BETWEEN '20201101' AND '20210131'
+ group by page_path
+)
+ select
+ user_sessions_count,
+ purchase_event_count,
+ round (((e_purchase/user_sessions_count)*100),6) as visit_to_purchase
+from cte1 
+ ;
